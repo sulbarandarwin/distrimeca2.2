@@ -1,0 +1,20 @@
+¡Claro! Después de reiniciar tu PC, para continuar trabajando en tu proyecto Laravel con XAMPP, necesitas asegurarte de que los siguientes servicios y procesos estén activos:
+
+Servicios de XAMPP (Desde el XAMPP Control Panel):
+
+Apache: Haz clic en "Start". Debe ponerse en verde.
+MySQL: Haz clic en "Start". Debe ponerse en verde.
+Procesos de Laravel (Desde la línea de comandos cmd en la carpeta de tu proyecto C:\xampp\htdocs\distrimeca):
+
+Servidor de desarrollo: En una ventana de cmd, ejecuta php artisan serve y déjala abierta.
+Compilador de assets (Vite): En otra ventana de cmd, ejecuta npm run dev y déjala abierta.
+Una vez que tengas Apache y MySQL en verde en XAMPP, y los comandos php artisan serve y npm run dev corriendo cada uno en su terminal, ¡estarás listo para continuar!
+
+Procesos de Laravel (Desde la línea de comandos cmd):
+
+Servidor de Desarrollo de Laravel: Abre una ventana de cmd, navega hasta la carpeta de tu proyecto (C:\xampp\htdocs\distrimeca) y ejecuta el comando php artisan serve. Debes dejar esta ventana abierta mientras trabajas. Esto permite acceder a tu aplicación en http://127.0.0.1:8000.
+Compilador de Assets (Vite): Abre otra ventana de cmd, navega hasta la carpeta de tu proyecto (C:\xampp\htdocs\distrimeca) y ejecuta el comando npm run dev. También debes dejar esta ventana abierta. Esto compila tus archivos CSS y JavaScript (incluyendo Alpine.js y jQuery) y los actualiza automáticamente si haces cambios
+
+C:\xampp2\php\php.exe artisan serve
+npm run dev
+http://127.0.0.1:8000
