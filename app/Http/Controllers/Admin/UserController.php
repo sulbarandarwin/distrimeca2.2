@@ -4,24 +4,25 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Models\Supplier;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
 use Spatie\Permission\Models\Role;
-use Illuminate\Support\Facades\Hash; // Para encriptar la contraseña
-use Illuminate\Validation\Rules\Password; // Para reglas de validación de contraseña
-use Illuminate\Validation\Rule; // Para reglas de validación avanzadas (como unique ignorando al usuario actual)
+use Illuminate\Validation\Rule;
+use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Auth;
 
 class UserController extends Controller
 {
     /**
      * Display a listing of the resource.
      */
-    public function index()
+    public function index() // <--- MÉTODO INDEX
     {
-        // Obtener usuarios paginados (ej: 10 por página)
-        $users = User::paginate(10);
-
-        // Pasar los usuarios a la vista
-        return view('admin.users.index', compact('users')); // Usamos compact() como atajo para ['users' => $users]
+        // Eager load roles and suppliers to prevent N+1 queries in the view
+        $users = User::with(['roles', 'suppliers'])->latest()->paginate(15);
+        return view('admin.users.index', compact('users'));
     }
 
     /**
@@ -29,11 +30,9 @@ class UserController extends Controller
      */
     public function create()
     {
-        // Obtener todos los roles disponibles para mostrarlos en el formulario
-        $roles = Role::all();
-
-        // Retornar la vista del formulario, pasando la lista de roles
-        return view('admin.users.create', compact('roles'));
+        $roles = Role::where('name', '!=', 'Admin')->orderBy('name')->get();
+        $suppliers = Supplier::orderBy('name')->pluck('name', 'id');
+        return view('admin.users.create', compact('roles', 'suppliers'));
     }
 
     /**
@@ -41,35 +40,72 @@ class UserController extends Controller
      */
     public function store(Request $request)
     {
-            // 1. Validación de los datos del formulario
+        Log::info('UserController@store: Inicio del método. Datos recibidos del formulario:', $request->all());
+
         $validatedData = $request->validate([
             'name' => ['required', 'string', 'max:255'],
-            'email' => ['required', 'string', 'lowercase', 'email', 'max:255', 'unique:'.User::class], // Asegura email único en tabla users
-            'password' => ['required', 'confirmed', Password::defaults()], // 'confirmed' verifica que coincida con password_confirmation
-            'roles' => ['required', 'array'], // Asegura que se envíe al menos un rol
-            'roles.*' => ['exists:roles,id'] // Asegura que cada ID de rol exista en la tabla 'roles'
+            'email' => ['required', 'string', 'email', 'max:255', Rule::unique('users')],
+            'password' => ['required', 'string', 'min:8', 'confirmed'],
+            'roles' => ['required', 'array', 'min:1'],
+            'roles.*' => ['integer', 'exists:roles,id'],
+            'suppliers' => ['nullable', 'array'],
+            'suppliers.*' => ['integer', 'exists:suppliers,id'],
         ]);
 
-        // 2. Crear el usuario si la validación pasa
-        $user = User::create([
-            'name' => $validatedData['name'],
-            'email' => $validatedData['email'],
-            'password' => Hash::make($validatedData['password']), // ¡Importante! Encriptar la contraseña
-        ]);
+        Log::info('UserController@store: Datos validados:', $validatedData);
 
-        // ----- INICIO: CORRECCIÓN AÑADIDA -----
-        // Asegurarse de que los IDs de los roles sean enteros
-        $roleIds = $validatedData['roles'];
-        $integerRoleIds = array_map('intval', $roleIds);
-        // ----- FIN: CORRECCIÓN AÑADIDA -----
+        $userData = Arr::except($validatedData, ['roles', 'suppliers', 'password', 'password_confirmation']);
+        $userData['password'] = Hash::make($validatedData['password']);
 
-        // 3. Asignar los roles validados (ahora como enteros) al nuevo usuario
-        // Usamos syncRoles que puede trabajar directamente con los IDs de los roles validados
-        $user->syncRoles($integerRoleIds); // <--- Pasamos el array de enteros
+        try {
+            $user = User::create($userData);
+            Log::info("UserController@store: Usuario creado con ID: {$user->id}, Nombre: {$user->name}");
+        } catch (\Exception $e) {
+            Log::error("UserController@store: Error al crear el usuario en la BD: " . $e->getMessage(), ['exception' => $e]);
+            return redirect()->route('admin.users.create')->with('error', 'Error al crear el usuario. Revise los logs.')->withInput();
+        }
 
-        // 4. Redirigir a la lista de usuarios con un mensaje de éxito
-        // El mensaje 'success' se guarda en la sesión y se puede mostrar en la vista index
-        return redirect()->route('admin.users.index')->with('success', '¡Usuario creado exitosamente!');
+        if (!empty($validatedData['roles'])) {
+            Log::info("UserController@store: Intentando sincronizar roles para el usuario ID {$user->id} con IDs:", $validatedData['roles']);
+            try {
+                // Convertir los IDs de rol a enteros (por si acaso)
+                $roleIds = array_map('intval', $validatedData['roles']);
+                $rolesToSync = Role::whereIn('id', $roleIds)->get();
+
+                if ($rolesToSync->count() !== count($roleIds)) {
+                     Log::warning("UserController@store: No todos los IDs de roles validados fueron encontrados como objetos Role. IDs validados:", $roleIds, "Roles encontrados:", $rolesToSync->pluck('id')->toArray());
+                }
+
+                if ($rolesToSync->isNotEmpty()) {
+                    $user->syncRoles($rolesToSync);
+                    $user->refresh()->load('roles');
+                    Log::info("UserController@store: Roles sincronizados usando objetos Role. Roles actuales del usuario: ", $user->getRoleNames()->toArray());
+                } else {
+                     Log::warning("UserController@store: No se encontraron objetos Role válidos para sincronizar con el usuario ID {$user->id}.");
+                }
+            } catch (\Exception $e) {
+                Log::error("UserController@store: Error al sincronizar roles para el usuario ID {$user->id}: " . $e->getMessage(), ['exception' => $e]);
+            }
+        } else {
+            Log::warning("UserController@store: No se proporcionaron roles para sincronizar para el usuario ID {$user->id}.");
+        }
+
+        if (isset($validatedData['roles']) && !empty($validatedData['roles'])) {
+            $isProveedor = $user->hasRole('Proveedor');
+            if ($isProveedor && !empty($validatedData['suppliers'])) {
+                 $user->suppliers()->sync($validatedData['suppliers']);
+                 Log::info("UserController@store: Proveedores sincronizados para Usuario ID {$user->id} (Rol Proveedor detectado).", ['supplier_ids' => $validatedData['suppliers']]);
+            } else {
+                 $user->suppliers()->detach();
+                 if($isProveedor){ Log::info("UserController@store: Rol Proveedor detectado para Usuario ID {$user->id} pero no se enviaron suppliers. Proveedores desasociados."); }
+                 else { Log::info("UserController@store: Proveedores desasociados para Usuario ID {$user->id} porque el rol Proveedor no está entre los asignados."); }
+            }
+        } else {
+            Log::info("UserController@store: No hay roles definidos para el usuario ID {$user->id}, desasociando proveedores.");
+            $user->suppliers()->detach();
+        }
+        Log::info("UserController@store: Fin del método store para usuario ID {$user->id}.");
+        return redirect()->route('admin.users.index')->with('success', 'Usuario creado exitosamente.');
     }
 
     /**
@@ -77,8 +113,7 @@ class UserController extends Controller
      */
     public function show(User $user)
     {
-        // Normalmente no se usa para gestión de usuarios, se usa edit.
-        // Puedes dejarlo vacío o redirigir a edit.
+        return redirect()->route('admin.users.edit', $user);
     }
 
     /**
@@ -86,11 +121,12 @@ class UserController extends Controller
      */
     public function edit(User $user)
     {
-            // Obtener todos los roles disponibles
-            $roles = Role::all();
-
-            // Retornar la vista del formulario de edición, pasando el usuario y los roles
-            return view('admin.users.edit', compact('user', 'roles'));
+        $user->load('roles', 'suppliers');
+        $roles = Role::where('name', '!=', 'Admin')->orderBy('name')->get();
+        $currentUserRoleId = $user->roles->first()?->id;
+        $suppliers = Supplier::orderBy('name')->pluck('name', 'id');
+        $userSupplierIds = $user->suppliers->pluck('id')->toArray();
+        return view('admin.users.edit', compact('user', 'roles', 'currentUserRoleId', 'suppliers', 'userSupplierIds'));
     }
 
     /**
@@ -98,48 +134,42 @@ class UserController extends Controller
      */
     public function update(Request $request, User $user)
     {
-                // 1. Validación de los datos del formulario
-            $validatedData = $request->validate([
-                'name' => ['required', 'string', 'max:255'],
-                'email' => [
-                    'required',
-                    'string',
-                    'lowercase',
-                    'email',
-                    'max:255',
-                    Rule::unique('users')->ignore($user->id) // ¡Importante! Ignora el email actual del propio usuario al validar unicidad
-                ],
-                'password' => ['nullable', 'confirmed', Password::defaults()], // 'nullable' hace la contraseña opcional
-                'roles' => ['required', 'array'],
-                'roles.*' => ['exists:roles,id']
-            ]);
+        Log::info("UserController@update: Actualizando usuario ID {$user->id}. Datos recibidos:", $request->all());
+        $validatedData = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'email' => ['required', 'string', 'email', 'max:255', Rule::unique('users')->ignore($user->id)],
+            'password' => ['nullable', 'string', 'min:8', 'confirmed'],
+            'role_id' => ['required', 'integer', 'exists:roles,id'],
+            'suppliers' => ['nullable', 'array'],
+            'suppliers.*' => ['integer', 'exists:suppliers,id'],
+        ]);
+        Log::info("UserController@update: Datos validados para usuario ID {$user->id}:", $validatedData);
 
-            // 2. Actualizar datos básicos del usuario (nombre y email)
-            $user->update([
-                'name' => $validatedData['name'],
-                'email' => $validatedData['email'],
-            ]);
+        $userData = Arr::except($validatedData, ['role_id', 'suppliers', 'password', 'password_confirmation', '_token', '_method']);
+        if (!empty($validatedData['password'])) {
+            $userData['password'] = Hash::make($validatedData['password']);
+        }
+        $user->update($userData);
+        Log::info("UserController@update: Datos básicos del usuario ID {$user->id} actualizados.");
 
-            // 3. Actualizar contraseña SOLO SI se proporcionó una nueva
-            // $request->filled() verifica que el campo no esté vacío
-            if ($request->filled('password')) {
-                // Validar de nuevo solo la contraseña (ya que era opcional antes)
-                $request->validate([
-                    'password' => ['required', 'confirmed', Password::defaults()],
-                ]);
-                // Asignar la nueva contraseña hasheada
-                $user->password = Hash::make($request->password);
-                $user->save(); // Guardar el cambio de contraseña
-            }
+        $selectedRole = Role::findById($validatedData['role_id']);
+        if ($selectedRole) {
+            $user->syncRoles([$selectedRole->id]);
+            $user->load('roles');
+            Log::info("UserController@update: Rol sincronizado para Usuario ID {$user->id}. Rol actual: " . $selectedRole->name);
+        } else {
+            Log::error("UserController@update: Rol ID {$validatedData['role_id']} validado pero no encontrado para usuario ID {$user->id}.");
+        }
 
-            // 4. Sincronizar los roles (quita los viejos, añade los nuevos seleccionados)
-            // Asegurarse de que los IDs de los roles sean enteros
-            $roleIds = $validatedData['roles'];
-            $integerRoleIds = array_map('intval', $roleIds);
-            $user->syncRoles($integerRoleIds);
-
-            // 5. Redirigir a la lista de usuarios con un mensaje de éxito
-            return redirect()->route('admin.users.index')->with('success', '¡Usuario actualizado exitosamente!');
+        $supplierIdsToSync = $validatedData['suppliers'] ?? [];
+        if ($selectedRole && $selectedRole->name === 'Proveedor') {
+            $user->suppliers()->sync($supplierIdsToSync);
+            Log::info("UserController@update: Proveedores sincronizados para Usuario ID {$user->id} (Rol Proveedor). IDs:", $supplierIdsToSync);
+        } else {
+            $user->suppliers()->detach();
+            Log::info("UserController@update: Proveedores desasociados para Usuario ID {$user->id} porque su rol no es Proveedor o fue cambiado.");
+        }
+        return redirect()->route('admin.users.index')->with('success', 'Usuario actualizado exitosamente.');
     }
 
     /**
@@ -147,22 +177,20 @@ class UserController extends Controller
      */
     public function destroy(User $user)
     {
-                // Protección 1: No permitir que un usuario se borre a sí mismo
-            if (auth()->user()->id === $user->id) {
-                return back()->with('error', '¡No puedes eliminar tu propia cuenta!');
-            }
-
-            // Protección 2: No permitir borrar al último Admin (opcional pero recomendado)
-            // Comprueba si el usuario a borrar tiene el rol 'Admin' Y si solo queda 1 admin en total
-            if ($user->hasRole('Admin') && User::role('Admin')->count() === 1) {
-                return back()->with('error', '¡No puedes eliminar al último administrador!');
-            }
-
-            // Si pasa las protecciones, borra el usuario
-            // Spatie debería encargarse de borrar las relaciones en model_has_roles automáticamente
+        if ($user->id === 1 || (Auth::check() && $user->id === Auth::id())) {
+            Log::warning("Intento de eliminar usuario protegido ID {$user->id} por el usuario ID " . (Auth::id() ?? 'N/A'));
+            return back()->with('error', 'No puedes eliminar este usuario.');
+        }
+        try {
+            Log::info("UserController@destroy: Intentando eliminar usuario ID {$user->id} por usuario ID " . (Auth::id() ?? 'N/A'));
+            $user->syncRoles([]);
+            $user->suppliers()->detach();
             $user->delete();
-
-            // Redirigir a la lista con mensaje de éxito
+            Log::info("Usuario ID {$user->id} eliminado exitosamente.");
             return redirect()->route('admin.users.index')->with('success', '¡Usuario eliminado exitosamente!');
+        } catch (\Exception $e) {
+            Log::error("Error al eliminar usuario ID {$user->id}: " . $e->getMessage(), ['exception' => $e]);
+            return back()->with('error', 'Ocurrió un error inesperado al eliminar el usuario.');
+        }
     }
 }

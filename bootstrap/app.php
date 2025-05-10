@@ -1,4 +1,4 @@
-<?php
+<?php // bootstrap/app.php
 
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -11,20 +11,26 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
-        // Registra los alias aquí:
+        // Registra tus alias de middleware aquí:
         $middleware->alias([
-            // Pueden existir otros alias por defecto o que hayas añadido...
-    
-            // <<< Asegúrate de que estas líneas estén presentes >>>
             'role' => \Spatie\Permission\Middleware\RoleMiddleware::class,
             'permission' => \Spatie\Permission\Middleware\PermissionMiddleware::class,
             'role_or_permission' => \Spatie\Permission\Middleware\RoleOrPermissionMiddleware::class,
+            // Otros alias que puedas tener...
         ]);
-    
-        // Otras configuraciones de middleware pueden ir aquí...
+        // ... otras configuraciones de middleware globales si las tienes ...
     })
+    // IMPORTANTE: La sección ->withProviders(...) está ahora vacía o puedes omitirla
+    // si no tienes OTROS proveedores que necesites registrar manualmente.
+    // Si la omites, asegúrate de que la cadena de métodos continúe correctamente:
+    // ->withMiddleware(...)
+    // ->withExceptions(...)
+    // ->create();
+    //
+    // Si prefieres dejarla vacía:
+    ->withProviders([
+        // App\Providers\OtroProviderQueNecesitesManualmente::class,
+    ])
     ->withExceptions(function (Exceptions $exceptions) {
-        //
+        // Configuración de manejo de excepciones...
     })->create();
-
-

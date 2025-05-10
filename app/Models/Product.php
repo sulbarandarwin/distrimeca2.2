@@ -5,16 +5,19 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Spatie\Activitylog\Traits\LogsActivity; // Asegúrate que estas líneas estén si usas ActivityLog
-use Spatie\Activitylog\LogOptions;          // Asegúrate que estas líneas estén si usas ActivityLog
+
+// Comentar también estas líneas 'use' para la prueba
+// use Spatie\Activitylog\Traits\LogsActivity; 
+// use Spatie\Activitylog\LogOptions;       
 
 class Product extends Model
 {
-    use HasFactory, LogsActivity; // Añade LogsActivity si lo estás usando
+    // Quitar LogsActivity de la línea 'use'
+    use HasFactory; // <--- SOLO dejamos HasFactory aquí
 
     /**
      * The attributes that are mass assignable.
-     *
+     * (Confirmamos que coincide con tu DB)
      * @var array<int, string>
      */
     protected $fillable = [
@@ -24,7 +27,6 @@ class Product extends Model
         'price',
         'supplier_id',
         'category_id',
-        // 'id', // <-- ¡ASEGÚRATE DE QUE 'id' NO ESTÉ AQUÍ!
     ];
 
     /**
@@ -40,10 +42,18 @@ class Product extends Model
      */
     public function category(): BelongsTo
     {
-        return $this->belongsTo(Category::class);
+         return $this->belongsTo(Category::class)->withDefault([
+             'name' => 'Sin Categoría' 
+         ]);
     }
 
-    // Método para configurar el log de actividad (si lo usas)
+    public function failures(): HasMany
+    {
+        return $this->hasMany(ProductFailure::class);
+    }
+    // --- FIN DE LA RELACIÓN ---
+
+    /* // Comentar TODO el método, desde ANTES de 'public function' hasta DESPUÉS del '}' final
     public function getActivitylogOptions(): LogOptions
     {
         return LogOptions::defaults()
@@ -52,4 +62,5 @@ class Product extends Model
             ->dontSubmitEmptyLogs()
             ->setDescriptionForEvent(fn(string $eventName) => "Producto {$eventName}");
     }
-}
+    */ 
+} // Fin de la clase Product

@@ -34,5 +34,20 @@ return [
             'channel' => env('SLACK_BOT_USER_DEFAULT_CHANNEL'),
         ],
     ],
+    'google' => [
+        'client_id' => env('GOOGLE_CLIENT_ID'),
+        'client_secret' => env('GOOGLE_CLIENT_SECRET'),
+        'redirect' => env('GOOGLE_REDIRECT_URI'),
+        'gemini_api_key' => env('GEMINI_API_KEY'), // <--- AÑADE ESTA LÍNEA
+    ],
+
+    'deepseek' => [
+    'api_key' => env('DEEPSEEK_API_KEY'),
+    'base_url' => env('DEEPSEEK_BASE_URL', 'https://api.deepseek.com'),
+    ],
+    
+    'openai' => [ // Si no tienes esta sección, añádela completa
+        'api_key' => env('OPENAI_API_KEY'),
+    ],
 
 ];

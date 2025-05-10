@@ -4,9 +4,12 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
-use App\Models\Setting; // <-- Importar modelo
-use Illuminate\Support\Facades\Artisan; // Para limpiar caché de config
-use Illuminate\Support\Facades\Log; // Para logging
+use App\Models\Setting;
+use App\Models\Country; // <-- Añadir import para Country
+use App\Models\State;   // <-- Añadir import para State
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\Rule;
 
 class SettingController extends Controller
 {
@@ -15,11 +18,21 @@ class SettingController extends Controller
      */
     public function index()
     {
-        // Obtenemos todas las configuraciones guardadas como una colección key => value
-        $settings = Setting::pluck('value', 'key');
+        // Obtener todas las configuraciones guardadas como un array asociativo [key => value]
+        $settings = Setting::pluck('value', 'key')->all(); 
 
-        // Pasamos la colección a la vista
-        return view('admin.settings.index', compact('settings'));
+        // Obtener todos los países para el dropdown
+        $countries = Country::orderBy('name')->get();
+
+        // Obtener los estados solo para el país por defecto seleccionado (si existe)
+        $statesForDefaultCountry = collect(); // Colección vacía por defecto
+        $defaultCountryId = $settings['default_country_id'] ?? null;
+        if ($defaultCountryId) {
+            $statesForDefaultCountry = State::where('country_id', $defaultCountryId)->orderBy('name')->get();
+        }
+
+        // Pasar todas las variables a la vista
+        return view('admin.settings.index', compact('settings', 'countries', 'statesForDefaultCountry'));
     }
 
     /**
@@ -27,37 +40,38 @@ class SettingController extends Controller
      */
     public function update(Request $request)
     {
-        // 1. Validar los datos del formulario
         $validated = $request->validate([
-            'app_name' => 'required|string|max:255',
-            // Añadir validación para otros campos si los agregas
-            // 'contact_email' => 'nullable|email',
+            'logo' => 'nullable|image|mimes:png,jpg,jpeg,svg,webp|max:2048',
+            'currency_symbol' => 'required|string|max:10',
+            'notification_email' => 'required|email|max:255',
+            'items_per_page' => 'required|integer|min:5|max:100',
+            'default_country_id' => 'nullable|exists:countries,id',
+            'default_state_id' => 'nullable|exists:states,id',
+            // --- NUEVAS VALIDACIONES PARA IA ---
+            'ai_search_provider' => ['nullable', 'string', Rule::in(['google_gemini', 'openai_gpt', 'deepseek', 'none'])], // AÑADIDO 'deepseek'
         ]);
-
-        // 2. Guardar cada configuración en la base de datos
+    
         try {
-            Setting::updateOrCreate(
-                ['key' => 'app_name'], // Buscar por esta clave
-                ['value' => $validated['app_name']] // Actualizar o crear con este valor
-            );
-
-            // Guardar otras configuraciones aquí...
-            // if ($request->filled('contact_email')) {
-            //     Setting::updateOrCreate(['key' => 'contact_email'], ['value' => $request->input('contact_email')]);
-            // }
-
-            // 3. Limpiar la caché de configuración para que los cambios se reflejen
-            // (Importante si usas config('settings.app_name') en algún lugar)
-            Artisan::call('config:clear');
-            Artisan::call('config:cache'); // Recachear con los nuevos valores (opcional pero recomendado)
-
+            // ... (tu lógica existente para guardar logo, currency, etc.) ...
+            if ($request->hasFile('logo') && $request->file('logo')->isValid()) {
+                // ... (código para guardar logo)
+            }
+            Setting::updateOrCreate(['key' => 'currency_symbol'], ['value' => $validated['currency_symbol']]);
+            Setting::updateOrCreate(['key' => 'notification_email'], ['value' => $validated['notification_email']]);
+            Setting::updateOrCreate(['key' => 'items_per_page'], ['value' => $validated['items_per_page']]);
+            Setting::updateOrCreate(['key' => 'default_country_id'], ['value' => $request->input('default_country_id')]);
+            Setting::updateOrCreate(['key' => 'default_state_id'], ['value' => $request->input('default_state_id')]);
+    
+            // --- GUARDAR NUEVAS CONFIGURACIONES DE IA ---
+            Setting::updateOrCreate(['key' => 'ai_search_provider'], ['value' => $request->input('ai_search_provider', 'none')]);
+    
             Log::info('Configuración actualizada por usuario ID: ' . auth()->id());
-
             return redirect()->route('admin.settings.index')->with('success', '¡Configuración guardada exitosamente!');
-
+    
         } catch (\Exception $e) {
-            Log::error("Error al guardar configuración: " . $e->getMessage());
-            return back()->with('error', 'Ocurrió un error al guardar la configuración.');
+            Log::error("Error al guardar configuración: " . $e->getMessage(), ['exception' => $e]);
+            return back()->with('error', 'Ocurrió un error al guardar la configuración. Revise los logs.')->withInput();
         }
+        
     }
 }

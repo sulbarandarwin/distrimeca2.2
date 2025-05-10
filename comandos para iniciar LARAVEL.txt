@@ -16,5 +16,8 @@ Servidor de Desarrollo de Laravel: Abre una ventana de cmd, navega hasta la carp
 Compilador de Assets (Vite): Abre otra ventana de cmd, navega hasta la carpeta de tu proyecto (C:\xampp\htdocs\distrimeca) y ejecuta el comando npm run dev. También debes dejar esta ventana abierta. Esto compila tus archivos CSS y JavaScript (incluyendo Alpine.js y jQuery) y los actualiza automáticamente si haces cambios
 
 C:\xampp2\php\php.exe artisan serve
+php artisan serve
 npm run dev
 http://127.0.0.1:8000
+php artisan view:clear
+php artisan optimize:clear
